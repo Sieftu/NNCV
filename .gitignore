@@ -174,5 +174,10 @@ cython_debug/
 .pypirc
 
 # data
-Weekly notebooks/data/
-**/data/
+data/
+
+# Slurm files (e.g., slurm-.out, slurm.log, slurm_job.sh, etc.)
+slurm*
+
+# Container
+*.sif
