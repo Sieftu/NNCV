@@ -185,3 +185,6 @@ slurm*
 # Model
 *.pt
 *.tar
+
+# Claude
+/.claude
