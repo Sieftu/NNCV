@@ -9,21 +9,13 @@ import os
 import json
 import csv
 import time
-import subprocess
 
 # Reconfigure stdout to UTF-8 so special chars survive any codec wrapper.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-# ---- ensure fvcore is installed ---------------------------------------------
-try:
-    from fvcore.nn import FlopCountAnalysis
-except ImportError:
-    print("fvcore not found - installing...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "fvcore", "-q"])
-    from fvcore.nn import FlopCountAnalysis
-
 import torch
+from torch.utils.flop_counter import FlopCounterMode
 import numpy as np
 from torchvision.datasets import Cityscapes
 from torchvision.transforms.v2 import Compose, ToImage, ToDtype
@@ -110,11 +102,11 @@ def part_a():
     print("  Computing FLOPs (on CPU)...")
     cpu_model = Model().cpu().eval()
     for shape in flops_shapes:
-        dummy_cpu = torch.zeros(*shape)
-        fa = FlopCountAnalysis(cpu_model, dummy_cpu)
-        fa.unsupported_ops_warnings(False)
-        fa.uncalled_modules_warnings(False)
-        gf = fa.total() / 1e9
+        x = torch.randn(shape)
+        flop_counter = FlopCounterMode(display=False, depth=0)
+        with flop_counter, torch.no_grad():
+            cpu_model(x)
+        gf = flop_counter.get_total_flops() / 1e9
         key = f"{shape[2]}x{shape[3]}"
         flops_gflops[key] = round(gf, 4)
         print(f"    {key}: {gf:.2f} GFLOPs")
