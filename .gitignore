@@ -181,3 +181,7 @@ slurm*
 
 # Container
 *.sif
+
+# Model
+*.pt
+*.tar
