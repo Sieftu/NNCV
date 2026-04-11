@@ -180,9 +180,6 @@ data/
 slurm*
 
 # Container
-<<<<<<< HEAD
-*.sif
-=======
 *.sif
 
 # Model
@@ -191,4 +188,3 @@ slurm*
 
 # Claude
 /.claude
->>>>>>> c85652634850cdb6d2fae91adbe7bd48a5d4b063
