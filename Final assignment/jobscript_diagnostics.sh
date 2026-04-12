@@ -12,4 +12,5 @@ srun apptainer exec --nv --env-file .env container.sif \
         --checkpoint     best_model-epoch=0055-val_loss=0.28399493731558323.pt \
         --out_dir        diagnostics_out \
         --wandb_project  5lsm0-cityscapes-segmentation \
-        --wandb_run_name baseline-diagnostics
+        --wandb_run_name baseline-diagnostics \
+        --res_sweep_only
