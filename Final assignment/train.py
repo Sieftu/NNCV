@@ -18,8 +18,9 @@ from argparse import ArgumentParser
 import wandb
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torchvision.datasets import Cityscapes
 from torchvision.utils import make_grid
 from torchvision.transforms.v2 import (
@@ -54,6 +55,35 @@ def convert_train_id_to_color(prediction: torch.Tensor) -> torch.Tensor:
             color_image[:, i][mask] = color[i]
 
     return color_image
+
+
+def compute_confusion_matrix(pred, gt, num_classes=19, ignore_index=255):
+    """pred, gt: [N] or [B,H,W] long tensors on same device. Returns [C,C] int64."""
+    mask = gt != ignore_index
+    pred = pred[mask]
+    gt = gt[mask]
+    idx = num_classes * gt + pred
+    return torch.bincount(idx, minlength=num_classes**2).reshape(num_classes, num_classes)
+
+
+def metrics_from_confusion(conf):
+    """conf: [C,C]. Returns (per_class_iou: [C] float tensor with NaN for absent classes, miou: float, pixel_acc: float)."""
+    conf = conf.float()
+    diag = conf.diag()
+    row = conf.sum(dim=1)
+    col = conf.sum(dim=0)
+    union = row + col - diag
+    iou = torch.where(union > 0, diag / union, torch.full_like(diag, float('nan')))
+    miou = torch.nanmean(iou).item()
+    pixel_acc = (diag.sum() / conf.sum().clamp(min=1)).item()
+    return iou, miou, pixel_acc
+
+
+CITYSCAPES_CLASSES = [
+    'road', 'sidewalk', 'building', 'wall', 'fence', 'pole', 'traffic_light',
+    'traffic_sign', 'vegetation', 'terrain', 'sky', 'person', 'rider', 'car',
+    'truck', 'bus', 'train', 'motorcycle', 'bicycle',
+]
 
 
 def get_args_parser():
@@ -150,9 +180,48 @@ def main(args):
     # Define the optimizer
     optimizer = AdamW(model.parameters(), lr=args.lr)
 
+    # Eval transforms: image at 256x256 (model input); label at native resolution (no resize)
+    eval_img_transform = Compose([
+        ToImage(),
+        Resize((256, 256)),
+        ToDtype(torch.float32, scale=True),
+        Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    ])
+    eval_target_transform = Compose([
+        ToImage(),
+        ToDtype(torch.int64),  # no resize, no scaling — keep native 1024x2048
+    ])
+
+    # Val eval dataloader: full-res labels, batch=1 to avoid OOM
+    val_eval_dataset = Cityscapes(
+        args.data_dir, split="val", mode="fine", target_type="semantic",
+        transform=eval_img_transform, target_transform=eval_target_transform,
+    )
+    val_eval_dataloader = DataLoader(
+        val_eval_dataset, batch_size=1, shuffle=False, num_workers=args.num_workers,
+    )
+
+    # Train-slice eval dataloader: first 500 images sorted deterministically by filename
+    train_eval_dataset = Cityscapes(
+        args.data_dir, split="train", mode="fine", target_type="semantic",
+        transform=eval_img_transform, target_transform=eval_target_transform,
+    )
+    _sorted_pairs = sorted(
+        zip(train_eval_dataset.images, train_eval_dataset.targets),
+        key=lambda p: os.path.basename(p[0]),
+    )
+    train_eval_dataset.images  = [p[0] for p in _sorted_pairs]
+    train_eval_dataset.targets = [p[1] for p in _sorted_pairs]
+    train_eval_dataloader = DataLoader(
+        Subset(train_eval_dataset, range(min(500, len(train_eval_dataset)))),
+        batch_size=1, shuffle=False, num_workers=args.num_workers,
+    )
+
     # Training loop
     best_valid_loss = float('inf')
     current_best_model_path = None
+    best_miou = 0.0
+    current_best_miou_path = None
     for epoch in range(args.epochs):
         print(f"Epoch {epoch+1:04}/{args.epochs:04}")
 
@@ -213,9 +282,26 @@ def main(args):
                     }, step=(epoch + 1) * len(train_dataloader) - 1)
             
             valid_loss = sum(losses) / len(losses)
-            wandb.log({
-                "valid_loss": valid_loss
-            }, step=(epoch + 1) * len(train_dataloader) - 1)
+
+            # Full-res mIoU evaluation on the entire val split
+            conf_val = torch.zeros(19, 19, dtype=torch.int64)
+            for images_e, labels_e in val_eval_dataloader:
+                labels_e = convert_to_train_id(labels_e)          # CPU, in-place
+                images_e = images_e.to(device)
+                labels_e_dev = labels_e.to(device).squeeze(1)     # (1, H, W)
+                outputs_e = model(images_e)                        # (1, 19, 256, 256)
+                h_nat, w_nat = labels_e_dev.shape[-2], labels_e_dev.shape[-1]
+                outputs_e = F.interpolate(
+                    outputs_e, size=(h_nat, w_nat), mode='bilinear', align_corners=False,
+                )
+                preds_e = outputs_e.argmax(dim=1)                  # (1, H, W)
+                conf_val += compute_confusion_matrix(preds_e.cpu(), labels_e.squeeze(1))
+
+            iou, miou, pixel_acc = metrics_from_confusion(conf_val)
+            log_dict = {"val/loss": valid_loss, "val/mIoU": miou, "val/pixel_acc": pixel_acc}
+            for ci, name in enumerate(CITYSCAPES_CLASSES):
+                log_dict[f"val/iou_{name}"] = iou[ci].item() if not torch.isnan(iou[ci]) else float('nan')
+            wandb.log(log_dict, step=(epoch + 1) * len(train_dataloader) - 1)
 
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
@@ -226,7 +312,40 @@ def main(args):
                     f"best_model-epoch={epoch:04}-val_loss={valid_loss:04}.pt"
                 )
                 torch.save(model.state_dict(), current_best_model_path)
-        
+
+            # mIoU-based checkpoint
+            if miou > best_miou:
+                best_miou = miou
+                if current_best_miou_path:
+                    os.remove(current_best_miou_path)
+                current_best_miou_path = os.path.join(
+                    output_dir,
+                    f"best_model_miou-epoch={epoch:04}-miou={miou:.4f}.pt",
+                )
+                torch.save(model.state_dict(), current_best_miou_path)
+
+        # Train-slice evaluation every 5 epochs
+        if (epoch + 1) % 5 == 0:
+            conf_tr = torch.zeros(19, 19, dtype=torch.int64)
+            model.eval()
+            with torch.no_grad():
+                for images_t, labels_t in train_eval_dataloader:
+                    labels_t = convert_to_train_id(labels_t)      # CPU, in-place
+                    images_t = images_t.to(device)
+                    labels_t_dev = labels_t.to(device).squeeze(1) # (1, H, W)
+                    outputs_t = model(images_t)                    # (1, 19, 256, 256)
+                    h_t, w_t = labels_t_dev.shape[-2], labels_t_dev.shape[-1]
+                    outputs_t = F.interpolate(
+                        outputs_t, size=(h_t, w_t), mode='bilinear', align_corners=False,
+                    )
+                    preds_t = outputs_t.argmax(dim=1)              # (1, H, W)
+                    conf_tr += compute_confusion_matrix(preds_t.cpu(), labels_t.squeeze(1))
+            _, train_miou, train_pix_acc = metrics_from_confusion(conf_tr)
+            wandb.log({
+                "train_eval/mIoU":      train_miou,
+                "train_eval/pixel_acc": train_pix_acc,
+            }, step=(epoch + 1) * len(train_dataloader) - 1)
+
     print("Training complete!")
 
     # Save the model
