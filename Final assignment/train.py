@@ -263,26 +263,44 @@ def main(args):
     ).to(device)
 
     # -------------------------------------------------------------------------
-    # OOM check (aug_only: 512x512 crops may not fit at batch_size=64)
+    # OOM check (aug_only: 512x512 crops may not fit at the requested batch_size).
+    # Tests with a full forward+backward to account for activation memory during
+    # training (inference alone uses ~3-4x less memory).
+    # Bisects batch_size down: requested -> /2 -> /4 -> /8 (floor at 8).
     # -------------------------------------------------------------------------
     train_batch_size = args.batch_size
     if args.augmentation == "aug_only" and torch.cuda.is_available():
-        try:
-            _dummy = torch.randn(train_batch_size, 3, 512, 512, device=device)
-            with torch.no_grad():
-                model(_dummy)
-            del _dummy
-            torch.cuda.empty_cache()
-        except RuntimeError as e:
-            if "out of memory" in str(e).lower():
+        _crit_oom = nn.CrossEntropyLoss(ignore_index=255)
+        test_bs = train_batch_size
+        while True:
+            try:
                 torch.cuda.empty_cache()
-                train_batch_size = 32
-                print(
-                    f"WARNING: OOM at batch_size={args.batch_size} with 512x512 crops, "
-                    f"falling back to batch_size={train_batch_size}. LR unchanged."
-                )
-            else:
-                raise
+                model.train()
+                _img = torch.randn(test_bs, 3, 512, 512, device=device)
+                _lbl = torch.randint(0, 19, (test_bs, 512, 512), device=device)
+                _loss = _crit_oom(model(_img), _lbl)
+                _loss.backward()
+                model.zero_grad(set_to_none=True)
+                del _img, _lbl, _loss
+                torch.cuda.empty_cache()
+                train_batch_size = test_bs
+                if test_bs < args.batch_size:
+                    print(
+                        f"WARNING: OOM at batch_size={args.batch_size} with 512x512 "
+                        f"training, falling back to batch_size={train_batch_size}. "
+                        f"LR unchanged."
+                    )
+                break
+            except RuntimeError as e:
+                if "out of memory" not in str(e).lower():
+                    raise
+                torch.cuda.empty_cache()
+                model.zero_grad(set_to_none=True)
+                if test_bs <= 8:
+                    raise RuntimeError(
+                        f"OOM even at batch_size=8 with 512x512 training on this GPU."
+                    ) from e
+                test_bs //= 2
 
     # -------------------------------------------------------------------------
     # Optional torch.compile
