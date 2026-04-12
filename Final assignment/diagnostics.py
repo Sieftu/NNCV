@@ -497,20 +497,53 @@ def render_d5(best5, worst5, med_cand, hard, out_dir):
 # ---------------------------------------------------------------------------
 
 def run_res_sweep(val_dataset, model, device, out_dir):
-    resolutions  = [(256, 256), (512, 1024), (768, 1536), (1024, 2048)]
+    resolutions  = [(256, 256), (256, 512), (384, 768), (512, 1024), (768, 1536), (1024, 2048)]
     sweep_rows   = []
+    NATIVE_H, NATIVE_W = 1024, 2048   # Cityscapes native label resolution
+
+    # ---- pipeline debug: one image at each resolution ----
+    print("  [D6 debug] pipeline shapes for val image 0:")
+    img_pil0, lbl_pil0 = val_dataset[0]
+    gt0 = load_gt(lbl_pil0)
+    print(f"    GT (native) shape  : {tuple(gt0.shape)}")
+    for h, w in resolutions:
+        pre0 = make_preprocess(h, w)
+        x0   = pre0(img_pil0).unsqueeze(0).to(device)
+        with torch.no_grad():
+            logits0  = model(x0)
+        logits_up0   = F.interpolate(logits0, size=(NATIVE_H, NATIVE_W),
+                                      mode="bilinear", align_corners=False)
+        pred0        = logits_up0.argmax(1).squeeze(0)
+        print(f"    res {h}x{w}: "
+              f"input={tuple(x0.shape)}  "
+              f"logits={tuple(logits0.shape)}  "
+              f"logits_up={tuple(logits_up0.shape)}  "
+              f"pred={tuple(pred0.shape)}  "
+              f"gt={tuple(gt0.shape)}")
+        assert pred0.shape == (NATIVE_H, NATIVE_W), \
+            f"pred shape mismatch: {pred0.shape}"
+        assert gt0.shape   == (NATIVE_H, NATIVE_W), \
+            f"gt shape mismatch: {gt0.shape}"
+    print("  [D6 debug] pipeline OK - all shapes verified.")
 
     for h, w in resolutions:
         pre  = make_preprocess(h, w)
         conf = torch.zeros(N, N, dtype=torch.int64)
         for idx in tqdm(range(len(val_dataset)), desc=f"sweep {h}x{w}"):
             img_pil, lbl_pil = val_dataset[idx]
-            x  = pre(img_pil).unsqueeze(0).to(device)
-            gt = load_gt(lbl_pil)
-            logits_up = F.interpolate(model(x), size=gt.shape,
-                                       mode="bilinear", align_corners=False)
-            _, pred = logits_up.softmax(1).max(1)
-            update_conf(conf, pred.squeeze(0).cpu(), gt)
+            x   = pre(img_pil).unsqueeze(0).to(device)
+            gt  = load_gt(lbl_pil)          # (1024, 2048) int64 CPU, never resized
+            # upsample logits to native resolution -- GT is never touched
+            logits_up = F.interpolate(
+                model(x), size=(NATIVE_H, NATIVE_W),
+                mode="bilinear", align_corners=False,
+            )
+            pred = logits_up.argmax(1).squeeze(0).cpu()   # (1024, 2048)
+            assert pred.shape == (NATIVE_H, NATIVE_W), \
+                f"pred shape {pred.shape} at res {h}x{w}"
+            assert gt.shape   == (NATIVE_H, NATIVE_W), \
+                f"gt shape {gt.shape} at res {h}x{w}"
+            update_conf(conf, pred, gt)
         iou  = iou_from_conf(conf)
         miou = iou[~iou.isnan()].mean().item()
         sweep_rows.append((h, w, miou))
@@ -652,6 +685,8 @@ def main():
     parser.add_argument("--res_sweep",      default=True,
                         action=argparse.BooleanOptionalAction,
                         help="Run D6 resolution sweep (4 extra val passes).")
+    parser.add_argument("--res_sweep_only", action="store_true", default=False,
+                        help="Run ONLY the D6 resolution sweep; skip D1/D2/D3/D5/D7/D11.")
     parser.add_argument("--train_eval_n",   type=int, default=500,
                         help="Number of train images for D11 gap estimate.")
     args = parser.parse_args()
@@ -689,65 +724,72 @@ def main():
                               mode="fine", target_type="semantic")
     print(f"Val split  : {len(val_dataset)} images")
 
-    # =========================================================================
-    # PASS 1: main val pass (D1, D2, D3, D5, D7)
-    # =========================================================================
-    print("\n=== Pass 1: main val pass ===")
-    with torch.no_grad():
-        res = run_val_pass(val_dataset, model, device)
+    miou = pix_acc = ece = 0.0
+    d3_rows = []
+    sweep_rows = []
+    train_miou = train_pix_acc = 0.0
+    n_train = 0
 
-    print("\n--- D1: per-class IoU ---")
-    miou, pix_acc = compute_d1(res["conf_global"], out_dir)
+    if not args.res_sweep_only:
+        # =====================================================================
+        # PASS 1: main val pass (D1, D2, D3, D5, D7)
+        # =====================================================================
+        print("\n=== Pass 1: main val pass ===")
+        with torch.no_grad():
+            res = run_val_pass(val_dataset, model, device)
 
-    print("\n--- D2: confusion matrix ---")
-    compute_d2(res["conf_global"], out_dir)
+        print("\n--- D1: per-class IoU ---")
+        miou, pix_acc = compute_d1(res["conf_global"], out_dir)
 
-    print("\n--- D3: boundary vs interior ---")
-    d3_rows = compute_d3(res["conf_bnd"], res["conf_int"], out_dir)
+        print("\n--- D2: confusion matrix ---")
+        compute_d2(res["conf_global"], out_dir)
 
-    print("\n--- D7: calibration ---")
-    ece = compute_d7(res["cal_count"], res["cal_conf_sum"], res["cal_corr_sum"],
-                     res["bin_edges"], out_dir)
+        print("\n--- D3: boundary vs interior ---")
+        d3_rows = compute_d3(res["conf_bnd"], res["conf_int"], out_dir)
 
-    print("\n--- D5: qualitative rendering ---")
-    render_d5(res["best5"], res["worst5"], res["med_cand"], res["hard"], out_dir)
+        print("\n--- D7: calibration ---")
+        ece = compute_d7(res["cal_count"], res["cal_conf_sum"], res["cal_corr_sum"],
+                         res["bin_edges"], out_dir)
+
+        print("\n--- D5: qualitative rendering ---")
+        render_d5(res["best5"], res["worst5"], res["med_cand"], res["hard"], out_dir)
 
     # =========================================================================
     # PASS 2 (x4): D6 resolution sweep
     # =========================================================================
-    sweep_rows = []
-    if args.res_sweep:
+    if args.res_sweep_only or args.res_sweep:
         print("\n=== Pass 2: D6 resolution sweep ===")
         with torch.no_grad():
             sweep_rows = run_res_sweep(val_dataset, model, device, out_dir)
 
-    # =========================================================================
-    # PASS 3: D11 train/val gap
-    # =========================================================================
-    print("\n=== Pass 3: D11 train/val gap ===")
-    train_dataset = Cityscapes(args.data_root, split="train",
-                                mode="fine", target_type="semantic")
-    print(f"Train split: {len(train_dataset)} images  (using first {args.train_eval_n})")
-    with torch.no_grad():
-        train_miou, train_pix_acc, n_train = run_train_eval(
-            train_dataset, model, device, args.train_eval_n,
+    if not args.res_sweep_only:
+        # =====================================================================
+        # PASS 3: D11 train/val gap
+        # =====================================================================
+        print("\n=== Pass 3: D11 train/val gap ===")
+        train_dataset = Cityscapes(args.data_root, split="train",
+                                    mode="fine", target_type="semantic")
+        print(f"Train split: {len(train_dataset)} images  (using first {args.train_eval_n})")
+        with torch.no_grad():
+            train_miou, train_pix_acc, n_train = run_train_eval(
+                train_dataset, model, device, args.train_eval_n,
+            )
+
+        with open(os.path.join(out_dir, "train_val_gap.csv"), "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["split", "n_images", "miou", "pixel_acc"])
+            w.writerow(["train", n_train,             f"{train_miou:.4f}", f"{train_pix_acc:.4f}"])
+            w.writerow(["val",   len(val_dataset),    f"{miou:.4f}",       f"{pix_acc:.4f}"])
+
+        # =====================================================================
+        # SUMMARY.md
+        # =====================================================================
+        print("\n--- Writing SUMMARY.md ---")
+        summary_path = write_summary(
+            out_dir, miou, pix_acc, ece, d3_rows, sweep_rows,
+            train_miou, train_pix_acc, n_train, len(val_dataset),
         )
-
-    with open(os.path.join(out_dir, "train_val_gap.csv"), "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["split", "n_images", "miou", "pixel_acc"])
-        w.writerow(["train", n_train,             f"{train_miou:.4f}", f"{train_pix_acc:.4f}"])
-        w.writerow(["val",   len(val_dataset),    f"{miou:.4f}",       f"{pix_acc:.4f}"])
-
-    # =========================================================================
-    # SUMMARY.md
-    # =========================================================================
-    print("\n--- Writing SUMMARY.md ---")
-    summary_path = write_summary(
-        out_dir, miou, pix_acc, ece, d3_rows, sweep_rows,
-        train_miou, train_pix_acc, n_train, len(val_dataset),
-    )
-    print(f"  -> {summary_path}")
+        print(f"  -> {summary_path}")
 
     # =========================================================================
     # wandb artifact
