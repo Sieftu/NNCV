@@ -118,17 +118,7 @@ def make_train_transform(crop_h: int, crop_w: int) -> Compose:
 
 # ── Loss ──────────────────────────────────────────────────────────────────────
 
-class DiceCELoss(nn.Module):
-    """0.6 × CrossEntropy + 0.4 × Dice (multiclass, from logits)."""
-
-    def __init__(self, ignore_index: int = 255):
-        super().__init__()
-        self.ce = nn.CrossEntropyLoss(ignore_index=ignore_index)
-        from segmentation_models_pytorch.losses import DiceLoss
-        self.dice = DiceLoss(mode="multiclass", ignore_index=ignore_index, from_logits=True)
-
-    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        return 0.6 * self.ce(logits, targets) + 0.4 * self.dice(logits, targets)
+from losses import DiceCELoss
 
 
 # ── Metrics helpers ───────────────────────────────────────────────────────────

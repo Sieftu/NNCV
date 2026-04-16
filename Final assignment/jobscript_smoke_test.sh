@@ -19,9 +19,6 @@ module purge
 module load 2023
 module load PyTorch/2.1.2-foss-2023a-CUDA-12.1.1
 
-# Activate project venv (created once via setup_venv.sh)
-source ~/venv_nncv/bin/activate
-
 # Load secrets for wandb
 set -a; source .env; set +a
 wandb login
