@@ -1,2 +1,0 @@
-transformers>=4.37.0
-timm>=0.9.0

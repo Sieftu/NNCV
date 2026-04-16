@@ -19,7 +19,6 @@ srun apptainer exec --nv \
     --bind "${DATA_ROOT}:./data/cityscapes" \
     container.sif /bin/bash -c "
         wandb login
-        pip install --quiet --user transformers timm
         python3 train.py --arch segformer_b2 --smoke_test --data_root ./data/cityscapes --checkpoint_dir ./checkpoints --wandb_run_name smoke_test_segformer_b2 --seed 42
         python3 train.py --arch unet         --smoke_test --data_root ./data/cityscapes --checkpoint_dir ./checkpoints --wandb_run_name smoke_test_unet         --seed 42
     "

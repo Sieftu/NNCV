@@ -10,9 +10,6 @@ date
 
 wandb login
 
-# transformers and timm are not in the container image — install to ~/.local once.
-pip install --quiet --user transformers timm
-
 python3 train.py \
     --arch           "${ARCH}" \
     --loss           dice_ce \
