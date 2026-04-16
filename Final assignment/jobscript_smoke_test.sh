@@ -16,9 +16,9 @@ DATA_ROOT="/gpfs/work5/0/jhstue005/JHS_data/CityScapes"
 
 srun apptainer exec --nv \
     --env-file .env \
-    --bind "${DATA_ROOT}:./data/cityscapes" \
+    --bind "${DATA_ROOT}:/data/cityscapes" \
     container.sif /bin/bash -c "
         wandb login
-        python3 train.py --arch segformer_b2 --smoke_test --data_root ./data/cityscapes --checkpoint_dir ./checkpoints --wandb_run_name smoke_test_segformer_b2 --seed 42
-        python3 train.py --arch unet         --smoke_test --data_root ./data/cityscapes --checkpoint_dir ./checkpoints --wandb_run_name smoke_test_unet         --seed 42
+        python3 train.py --arch segformer_b2 --smoke_test --data_root /data/cityscapes --checkpoint_dir ./checkpoints --wandb_run_name smoke_test_segformer_b2 --seed 42
+        python3 train.py --arch unet         --smoke_test --data_root /data/cityscapes --checkpoint_dir ./checkpoints --wandb_run_name smoke_test_unet         --seed 42
     "

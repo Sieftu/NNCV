@@ -16,5 +16,5 @@ DATA_ROOT="/gpfs/work5/0/jhstue005/JHS_data/CityScapes"
 
 srun apptainer exec --nv \
     --env-file .env \
-    --bind "${DATA_ROOT}:./data/cityscapes" \
+    --bind "${DATA_ROOT}:/data/cityscapes" \
     container.sif /bin/bash main.sh segformer_b2
