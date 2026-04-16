@@ -1,4 +1,0 @@
-width_px,acc_boundary,acc_interior,ratio,miou_boundary,miou_interior
-1,0.5984,0.9315,0.6424,0.2416,0.5158
-3,0.6384,0.9426,0.6773,0.2810,0.5389
-9,0.7392,0.9581,0.7715,0.3634,0.5723

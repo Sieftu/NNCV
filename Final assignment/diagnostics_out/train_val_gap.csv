@@ -1,3 +1,0 @@
-split,n_images,miou,pixel_acc
-train,500,0.7149,0.9556
-val,503,0.4953,0.9199
