@@ -16,7 +16,7 @@ python3 train.py \
     --epochs         160 \
     --batch_size     8 \
     --crop_size      512 1024 \
-    --data_root      "/gpfs/home5/scur2178/NNCV/Final assignment/data/cityscapes" \
+    --data_root      ./data/cityscapes \
     --checkpoint_dir ./checkpoints \
     --wandb_run_name "${ARCH}" \
     --seed           42
