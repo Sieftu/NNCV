@@ -19,7 +19,7 @@ srun apptainer exec --nv \
         echo '=== Step A: Fit temperature scalar ==='
         date
         python3 fit_temperature.py \
-            --checkpoint checkpoints/segformer/best_model_miou.pt \
+            --checkpoint checkpoints/segformer_b2/best_model_miou.pt \
             --data_root  ./data/cityscapes
 
         TEMPERATURE=\$(python3 -c \"import json; print(json.load(open('temperature.json'))['temperature'])\")
@@ -29,7 +29,7 @@ srun apptainer exec --nv \
         echo '=== Step B: Calibrate all OOD methods ==='
         date
         python3 calibrate_ood.py \
-            --checkpoint checkpoints/segformer/best_model_miou.pt \
+            --checkpoint checkpoints/segformer_b2/best_model_miou.pt \
             --data_root  ./data/cityscapes \
             --temperature \$TEMPERATURE
 
