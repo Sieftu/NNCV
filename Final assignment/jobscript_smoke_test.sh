@@ -13,20 +13,13 @@ mkdir -p logs
 
 # Path to Cityscapes on the cluster — verify with: ls /gpfs/work5/0/jhstue005/JHS_data/
 DATA_ROOT="/gpfs/work5/0/jhstue005/JHS_data/CityScapes"
-export DATA_ROOT
 
-module purge
-module load 2023
-module load PyTorch/2.1.2-foss-2023a-CUDA-12.1.1
-
-# Load secrets for wandb
-set -a; source .env; set +a
-wandb login
-
-srun python3 train.py --arch segformer_b2 --smoke_test \
-    --data_root "${DATA_ROOT}" --checkpoint_dir ./checkpoints \
-    --wandb_run_name smoke_test_segformer_b2 --seed 42
-
-srun python3 train.py --arch unet --smoke_test \
-    --data_root "${DATA_ROOT}" --checkpoint_dir ./checkpoints \
-    --wandb_run_name smoke_test_unet --seed 42
+srun apptainer exec --nv \
+    --env-file .env \
+    --bind "${DATA_ROOT}:./data/cityscapes" \
+    container.sif /bin/bash -c "
+        wandb login
+        pip install --quiet --user transformers timm
+        python3 train.py --arch segformer_b2 --smoke_test --data_root ./data/cityscapes --checkpoint_dir ./checkpoints --wandb_run_name smoke_test_segformer_b2 --seed 42
+        python3 train.py --arch unet         --smoke_test --data_root ./data/cityscapes --checkpoint_dir ./checkpoints --wandb_run_name smoke_test_unet         --seed 42
+    "

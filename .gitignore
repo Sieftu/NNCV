@@ -188,3 +188,8 @@ slurm*
 
 # Claude
 /.claude
+Final assignment/back up/jobscript_slurm.sh
+Final assignment/back up/main.sh
+Final assignment/back up/model.py
+Final assignment/back up/predict.py
+Final assignment/back up/train.py
