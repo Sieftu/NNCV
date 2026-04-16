@@ -11,10 +11,6 @@
 
 mkdir -p logs
 
-# Path to Cityscapes on the cluster — verify with: ls /gpfs/work5/0/jhstue005/JHS_data/
-DATA_ROOT="/gpfs/work5/0/jhstue005/JHS_data/CityScapes"
-
 srun apptainer exec --nv \
     --env-file .env \
-    --bind "${DATA_ROOT}:/data/cityscapes" \
     container.sif /bin/bash main.sh unet
