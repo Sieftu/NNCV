@@ -14,9 +14,23 @@ mkdir -p logs
 srun apptainer exec --nv \
     --env-file .env \
     container.sif /bin/bash -c "
+        set -euo pipefail
+
+        IMAGE=\$(find ./data/cityscapes/leftImg8bit/val -name '*.png' | sort | head -1)
+        if [ -z \"\$IMAGE\" ]; then
+            echo 'ERROR: no val images found under ./data/cityscapes/leftImg8bit/val' >&2
+            exit 1
+        fi
+        # Derive the matching gtFine labelIds path from the image path
+        GT=\$(echo \"\$IMAGE\" \
+            | sed 's|leftImg8bit/val|gtFine/val|' \
+            | sed 's|_leftImg8bit\\.png|_gtFine_labelIds.png|')
+        echo \"Image : \$IMAGE\"
+        echo \"GT    : \$GT\"
+
         python3 generate_qualitative_figure.py \
-            --image  data/cityscapes/leftImg8bit/val/frankfurt/frankfurt_000000_001016_leftImg8bit.png \
-            --gt     data/cityscapes/gtFine/val/frankfurt/frankfurt_000000_001016_gtFine_labelIds.png \
+            --image  \"\$IMAGE\" \
+            --gt     \"\$GT\" \
             --unet-ckpt       checkpoints/unet/best_model_miou.pt \
             --segformer-ckpt  checkpoints/segformer_b2/best_model_miou_segformer.pt \
             --segformer-config segformer_config \
