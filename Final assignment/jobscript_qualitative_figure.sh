@@ -17,8 +17,8 @@ srun apptainer exec --nv \
         python3 generate_qualitative_figure.py \
             --image  data/cityscapes/leftImg8bit/val/frankfurt/frankfurt_000000_001016_leftImg8bit.png \
             --gt     data/cityscapes/gtFine/val/frankfurt/frankfurt_000000_001016_gtFine_labelIds.png \
-            --unet-ckpt       best_model_miou_unet.pt \
-            --segformer-ckpt  best_model_miou_segformer.pt \
+            --unet-ckpt       checkpoints/unet/best_model_miou.pt \
+            --segformer-ckpt  checkpoints/segformer_b2/best_model_miou_segformer.pt \
             --segformer-config segformer_config \
             --output-dir      figures \
             --unet-preprocess starter
