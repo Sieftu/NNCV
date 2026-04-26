@@ -1,85 +1,265 @@
-# Final Assignment: Cityscape Challenge  
+# 5LSM0 Final Assignment - Cityscapes Challenge
 
-Welcome to the **Cityscape Challenge**, the final project for this course!  
+Code accompanying the final assignment of **5LSM0 Neural Networks for Computer
+Vision** at the Department of Electrical Engineering, Eindhoven University of
+Technology. The repository contains a baseline U-Net submission, a recipe-trained
+U-Net used for the ablation study, a SegFormer-B2 submission for the Peak
+Performance benchmark, and four scoring variants for the Out-of-Distribution
+benchmark.
 
-In this assignment, you'll put your knowledge of Neural Networks (NNs) for computer vision into action by tackling real-world problems using the **CityScapes dataset**. This dataset contains large-scale, high-quality images of urban environments, making it perfect for tasks like **semantic segmentation** and **object detection**.  
+- Author: `<<FILL IN: Thor Lastname>>`
+- TU/e email: `<<FILL IN: t.lastname@student.tue.nl>>`
 
-This challenge is designed to push your skills further, focusing on practical and often under-explored issues crucial for deploying computer vision models in real-world scenarios.  
+## Submission-server usernames
 
----
+| Username | Server | Experiment | MeanDice / MIoU |
+|---|---|---|---|
+| `Thor_Baseline_unet` | Peak | Baseline U-Net (starter recipe, 50 ep, 256x256, CE) | 0.520 / 0.414 |
+| `Thor_Seg_PP` | Peak | SegFormer-B2 (full recipe, 160 ep, 512x1024, Dice+CE) | 0.573 / 0.468 |
+| `Thor_ood_msp` | OOD | SegFormer-B2 + Maximum Softmax Probability | 0.518 / 0.445 |
+| `Thor_ood_temp_msp` | OOD | SegFormer-B2 + Temperature-scaled MSP (T = 1.42) | 0.504 / 0.434 |
+| `Thor_ood_energy` | OOD | SegFormer-B2 + Energy score (T = 1.42) | 0.608 / 0.518 |
+| `Thor_ood_pixel_unc` | OOD | SegFormer-B2 + Pixel Uncertainty Voting | 0.475 / 0.410 |
 
-## Benchmarks  
+## Repository structure
 
-The competition comprises four benchmarks, each targeting a specific aspect of model performance:  
+```
+.
+├── README.md                    # this file
+├── .gitignore
+├── .env.example                 # template for WANDB credentials
+├── main.sh                      # training entrypoint executed inside the container
+├── jobscript_slurm.sh           # SLURM submission script
+├── download_docker_and_data.sh  # one-shot fetch of dataset and Apptainer container
+│
+├── READMEs/                     # course-provided originals, kept verbatim
+│   ├── README.md                # final-assignment overview from the course
+│   ├── README-Report.md         # report-writing guidelines
+│   ├── README-Submission.md     # Docker contract for the challenge servers
+│   ├── README-Installation.md   # local environment setup
+│   ├── README-Slurm.md          # HPC workflow
+│   └── img/
+│
+├── Baseline/                    # mandatory baseline submission (Thor_Baseline_unet)
+│   ├── model.py                 # course-provided U-Net
+│   ├── train.py                 # starter trainer (256x256, CE, 0.5/0.5 normalisation)
+│   ├── predict.py               # starter inference matching the baseline checkpoint
+│   └── Dockerfile
+│
+├── UNetRecipe/                  # ablation: U-Net trained with the SegFormer recipe
+│   ├── model.py                 # same U-Net architecture as Baseline
+│   ├── train.py                 # full recipe (160 ep, 512x1024, Dice+CE, ImageNet norm)
+│   ├── predict.py               # native-resolution inference, ImageNet norm
+│   └── losses.py                # Dice + DiceCE loss
+│
+├── PeakPerformance/             # main Peak submission (Thor_Seg_PP)
+│   ├── model.py                 # SegFormer-B2 wrapper (HuggingFace)
+│   ├── train.py                 # same recipe as UNetRecipe
+│   ├── predict.py               # native-resolution inference, ImageNet norm
+│   ├── losses.py
+│   ├── segformer_config/        # local HF config so the container needs no internet
+│   │   └── config.json
+│   └── Dockerfile
+│
+└── OOD/                         # Out-of-Distribution submissions (Thor_ood_*)
+    ├── model.py                 # SegFormer-B2 backbone + OOD scoring head
+    ├── ood_scoring.py           # msp, energy, pixel_uncertainty, entropy
+    ├── predict.py               # OOD inference (mask + predictions.csv)
+    ├── calibrate_ood.py         # 99th-percentile thresholds on Cityscapes val
+    ├── fit_temperature.py       # NLL-minimising temperature scalar
+    ├── configs/
+    │   ├── ood_config_msp.json
+    │   ├── ood_config_temp_msp.json
+    │   ├── ood_config_energy.json
+    │   └── ood_config_pixel_uncertainty.json
+    ├── segformer_config/
+    │   └── config.json
+    └── Dockerfile
+```
 
-1. **Peak performance**  
-   This benchmark evaluates your model's segmentation accuracy on a clean, standardized test set. Your goal is to achieve the highest segmentation scores here. **Everyone should submit a model to this benchmark optimized for maximum performance**. However, it's crucial to implement changes thoughtfully and be able to justify them in your research paper. Ultimately, the focus should be on the scientific contributions of your adaptations rather than solely aiming for the highest score.
+## Environment setup
 
-The following benchmarks 2–4 are optional, and **you should select one** to compare against the Peak Performance benchmark. This allows you to analyze how your model performs under different conditions and gain deeper insights beyond just optimizing for the highest score.
+### HPC cluster (Snellius)
 
-2. **Robustness**  
-   This benchmark tests how well your model performs under challenging conditions, such as changes in lighting, weather, or image quality. Consistency is key in this category.  
+The shared course container `cclaess/5lsm0:v1` carries PyTorch, torchvision, the
+HuggingFace stack used by SegFormer, and `wandb`. Pull it once and grab the
+Cityscapes data:
 
-3. **Efficiency**  
-   Practical applications often require compact models. This benchmark emphasizes creating smaller models that maintain acceptable performance. It’s particularly relevant for edge devices where large models are infeasible.  
+```bash
+chmod +x download_docker_and_data.sh
+sbatch download_docker_and_data.sh
+```
 
-4. **Out-of-distribution detection**  
-   Models often encounter data that differs from the training distribution, leading to unreliable predictions. This benchmark evaluates your model's ability to detect and handle such out-of-distribution samples.  
+This produces `container.sif` and a populated `data/cityscapes/` directory next
+to the repository root.
 
-> **IMPORTANT NOTE**: The **Peak Permomance** benchmark will also serve as the baseline server, and all participants must submit a baseline model here. This means that you can just train the already provided model in the repo. The training code for this model is also already provided. The baseline submission serves two purposes: ensuring that everyone is familiar with working on an HPC cluster and providing a reference point for evaluating the impact of different adaptations in your other benchmark submissions (you need to show these improvements compared to the baseline in your report!). The Baseline benchmark will close on **Tuesday, March 17, at 11:59 P.M. (GMT+1)**. To avoid last-minute issues, start preparing your submission early. This will also give you time to ask questions during the scheduled computer classes if needed.
+Copy `.env.example` to `.env` and fill in your Weights & Biases credentials:
 
----
+```bash
+cp .env.example .env
+$EDITOR .env   # set WANDB_API_KEY and WANDB_DIR
+```
 
-## Deliverables  
+Submit a training job with:
 
-Your final submission will consist of the following:  
+```bash
+sbatch jobscript_slurm.sh
+```
 
-### 1. Research paper  
-Write a **3-4 page research paper** in [IEEE double-column format](https://www.overleaf.com/latex/templates/ieee-conference-template/grfzhhncsfqn), addressing (at least) the following:  
+`jobscript_slurm.sh` calls `main.sh segformer_b2` inside the container.
 
-- **Abstract**: Summarize the current problems, your key steps for addressing them and your main findings in about 100-300 words.
-- **Introduction**: Present the problem, challenges, and potential solutions based on existing literature.  
-- **Methods**: Describe your dataset(s), outline the baseline approach using an off-the-shelf segmentation model and define the enhancements you made for the specific benchmarks you participated.  
-- **Results**: Show and describe your results based on performance metrics and examples. Use figures and tables to support your findings. 
-- **Discussion**: Discuss the impact and potential of your main findings. Also discuss limitations and suggest future improvements.
+### Local machine
 
-> **Submission**: Submit your paper as a PDF document via **Canvas**.
+The dependencies imported by `train.py`, `predict.py` and the OOD scripts are:
 
-The paper will be graded based on clarity, experimental design, insight, and originality.  
+```bash
+pip install torch torchvision pillow transformers timm wandb numpy tqdm matplotlib
+```
 
-### 2. Code repository  
-Push all relevant code to a **public GitHub repository** with a README.md file detailing:  
-- Required libraries and installation instructions.  
-- Steps to run your code.  
-- Your Codalab username and TU/e email address for correct mapping across systems.  
+`tqdm` and `matplotlib` are optional (used only for the calibration progress
+bar and figures, respectively).
 
-### 3. Challenge platform submissions  
-The Cityscape Challenge will be hosted on a **dedicated course compute platform** (instead of Codalab used in previous years).
+## Data setup
 
-You will receive clear, step-by-step instructions for making submission once the final assignment begins.
+`download_docker_and_data.sh` calls `huggingface-cli` inside the container to
+fetch the dataset from `TimJaspersTue/5LSM0`. The resulting layout is
+`./data/cityscapes/{leftImg8bit,gtFine}/{train,val,test}/...` and is what every
+training script expects via `--data_root ./data/cityscapes`. No further
+preprocessing is required.
 
----
+## Training
 
-## Grading and Bonus Points  
+All commands assume the working directory is the repository root.
 
-The final assignment accounts for **50% of your course grade**. Additionally, bonus points are available:  
+### Baseline (starter U-Net)
 
-- **Top 3 in any benchmark**: +0.25 to your final assignment grade.  
-- **Best performance in any benchmark**: +0.5 to your final assignment grade.  
+```bash
+python Baseline/train.py \
+  --data-dir ./data/cityscapes \
+  --batch-size 64 \
+  --epochs 50 \
+  --lr 0.001 \
+  --num-workers 10 \
+  --seed 42 \
+  --experiment-id Thor_Baseline_unet
+```
 
-For example, achieving the best performance in 'Peak Performance' and a top 3 spot in another benchmark will earn you a 0.75 bonus.  
+Trains the starter U-Net with the course-provided recipe (256x256 input,
+cross-entropy loss, mean/std = 0.5). Best checkpoint is written to
+`checkpoints/Thor_Baseline_unet/best_model-epoch=...pt`. Copy it to
+`Baseline/model.pt` before building the Docker image.
 
-> **Note**: The bonus is optional. A great report with an innovative solution that doesn't rank highly can still earn a perfect score (10).  
+### UNet Recipe (ablation only - not submitted to the server)
 
----
+```bash
+python UNetRecipe/train.py \
+  --arch unet \
+  --epochs 160 \
+  --batch_size 8 \
+  --crop_size 512 1024 \
+  --loss dice_ce \
+  --data_root ./data/cityscapes \
+  --checkpoint_dir ./checkpoints \
+  --wandb_run_name unet_recipe \
+  --seed 42
+```
 
-## Important Notes  
+Best validation mIoU 0.607 on Cityscapes val. Used in the report's ablation
+table to isolate the contribution of training recipe versus architecture.
 
-- Ensure a proper **train-validation split** of the CityScapes dataset.  
-- Training your model may take multiple hours; plan accordingly.  
-- Use ideas from literature but remember to **cite all sources**. Plagiarism will not be tolerated.  
-- For questions or challenges, use the **Discussions** section of this repository to collaborate with peers.  
+### Peak Performance (SegFormer-B2)
 
----
+```bash
+python PeakPerformance/train.py \
+  --arch segformer_b2 \
+  --epochs 160 \
+  --batch_size 8 \
+  --crop_size 512 1024 \
+  --loss dice_ce \
+  --data_root ./data/cityscapes \
+  --checkpoint_dir ./checkpoints \
+  --wandb_run_name Thor_Seg_PP \
+  --seed 42
+```
 
-We wish you the best of luck in this challenge and are excited to see the innovative solutions you develop! 🚀
+Best validation mIoU 0.892, test mIoU 0.468 (`Thor_Seg_PP`). The same
+checkpoint is reused as the OOD backbone.
+
+## OOD threshold calibration
+
+After training the SegFormer-B2 checkpoint, calibrate the four OOD scoring
+methods on the Cityscapes val set:
+
+```bash
+cd OOD
+python fit_temperature.py \
+  --checkpoint ../checkpoints/Thor_Seg_PP/best_model_miou.pt \
+  --data_root ../data/cityscapes
+
+python calibrate_ood.py \
+  --checkpoint ../checkpoints/Thor_Seg_PP/best_model_miou.pt \
+  --data_root ../data/cityscapes \
+  --temperature $(python -c "import json; print(json.load(open('temperature.json'))['temperature'])")
+```
+
+`fit_temperature.py` writes `temperature.json` (T \approx 1.42 with the
+shipped checkpoint). `calibrate_ood.py` writes `ood_thresholds.json`, whose
+four entries populate the four `configs/ood_config_*.json` files. Each config
+is wired into a separate Docker image at build time (next section).
+
+## Building and submitting Docker images
+
+Each experiment folder is a self-contained build context. Place the trained
+checkpoint at `<folder>/model.pt` before building.
+
+### Baseline
+
+```bash
+cp checkpoints/Thor_Baseline_unet/best_model-epoch=*.pt Baseline/model.pt
+docker build -t nncv:baseline -f Baseline/Dockerfile Baseline/
+docker save -o submission_baseline.tar nncv:baseline
+```
+
+### Peak Performance
+
+```bash
+cp checkpoints/Thor_Seg_PP/best_model_miou.pt PeakPerformance/model.pt
+docker build -t nncv:peak -f PeakPerformance/Dockerfile PeakPerformance/
+docker save -o submission_peak.tar nncv:peak
+```
+
+### OOD (one image per scoring method)
+
+```bash
+cp checkpoints/Thor_Seg_PP/best_model_miou.pt OOD/model.pt
+
+docker build -t nncv:ood-msp     --build-arg OOD_CONFIG=ood_config_msp.json                 -f OOD/Dockerfile OOD/
+docker build -t nncv:ood-tempmsp --build-arg OOD_CONFIG=ood_config_temp_msp.json            -f OOD/Dockerfile OOD/
+docker build -t nncv:ood-energy  --build-arg OOD_CONFIG=ood_config_energy.json              -f OOD/Dockerfile OOD/
+docker build -t nncv:ood-pixel   --build-arg OOD_CONFIG=ood_config_pixel_uncertainty.json   -f OOD/Dockerfile OOD/
+
+for tag in ood-msp ood-tempmsp ood-energy ood-pixel; do
+  docker save -o submission_${tag}.tar nncv:${tag}
+done
+```
+
+The `OOD_CONFIG` build argument selects which `configs/*.json` is copied to
+`/app/ood_config.json` inside the container. The Python code reads that file
+at construction time.
+
+For local testing and the upload step, see
+[READMEs/README-Submission.md](READMEs/README-Submission.md).
+
+## Experiment tracking
+
+`train.py` logs to Weights & Biases. The `--wandb_run_name` (or
+`--experiment-id` for the Baseline starter) becomes the W&B run name. Set
+`WANDB_API_KEY` in `.env` before submitting a SLURM job; the script logs in
+automatically inside the container. `.env` is gitignored.
+
+## Hardware
+
+Training was run on the TU/e SLURM cluster, partitions `gpu_a100` (A100 40GB)
+and `gpu_h100` (H100 80GB), with `--cpus-per-task=18` and `--gpus=1`.
+SegFormer-B2 fits comfortably on a single A100 at batch size 8 with bfloat16
+autocast.

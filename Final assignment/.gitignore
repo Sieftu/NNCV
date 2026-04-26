@@ -1,3 +1,34 @@
-data/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Model weights, container, dataset
+*.pt
+*.pth
+*.tar
 *.sif
-*.out
+data/
+checkpoints/
+outputs/
+local_data/
+local_output/
+
+# Logs
+wandb/
+slurm-*.out
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+.Rhistory
+
+# Secrets
+.env
+
+# Internal working directory (not pushed)
+_archive/

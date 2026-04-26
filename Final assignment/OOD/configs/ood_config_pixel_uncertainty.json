@@ -1,0 +1,5 @@
+{
+    "method": "pixel_uncertainty",
+    "threshold": 0.0059599741362035275,
+    "conf_threshold": 0.5
+}
