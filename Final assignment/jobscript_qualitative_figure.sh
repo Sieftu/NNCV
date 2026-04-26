@@ -16,7 +16,7 @@ srun apptainer exec --nv \
     container.sif /bin/bash -c "
         set -euo pipefail
 
-        IMAGE=\$(find ./data/cityscapes/leftImg8bit/val -name '*.png' | sort | head -1)
+        IMAGE=\$(find ./data/cityscapes/leftImg8bit/val -name '*.png' | sort | head -1 || true)
         if [ -z \"\$IMAGE\" ]; then
             echo 'ERROR: no val images found under ./data/cityscapes/leftImg8bit/val' >&2
             exit 1
