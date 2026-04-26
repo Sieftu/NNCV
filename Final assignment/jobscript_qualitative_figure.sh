@@ -33,7 +33,6 @@ srun apptainer exec --nv \
             --gt     \"\$GT\" \
             --unet-ckpt       checkpoints/unet/best_model_miou.pt \
             --segformer-ckpt  checkpoints/segformer_b2/best_model_miou.pt \
-            --segformer-config /app/segformer_config \
             --output-dir      figures \
             --unet-preprocess starter
     "

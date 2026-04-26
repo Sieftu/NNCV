@@ -74,12 +74,11 @@ except ImportError:
         ) from e
 
 try:
-    from transformers import SegformerConfig, SegformerForSemanticSegmentation
+    from model_segformer import Model as SegFormer
 except ImportError as e:
     raise ImportError(
-        "huggingface `transformers` is required for the SegFormer branch. "
-        "Install it in the same environment used for training: "
-        "`pip install transformers`."
+        "Could not import SegFormer Model class from `model_segformer.py`. "
+        "Run this script from the directory that contains it."
     ) from e
 
 # ---------------------------------------------------------------------------
@@ -125,9 +124,8 @@ def load_unet(ckpt_path: Path, device: str) -> nn.Module:
     return model.eval().to(device)
 
 
-def load_segformer(ckpt_path: Path, config_dir: Path, device: str) -> nn.Module:
-    config = SegformerConfig.from_pretrained(str(config_dir))
-    model = SegformerForSemanticSegmentation(config)
+def load_segformer(ckpt_path: Path, device: str) -> nn.Module:
+    model = SegFormer(in_channels=3, n_classes=19)
     state_dict = torch.load(ckpt_path, map_location=device, weights_only=True)
     model.load_state_dict(state_dict, strict=True)
     return model.eval().to(device)
@@ -179,13 +177,8 @@ def predict_unet(model: nn.Module, img: Image.Image, mode: str, device: str) -> 
 
 @torch.no_grad()
 def predict_segformer(model: nn.Module, img: Image.Image, device: str) -> np.ndarray:
-    w, h = img.size
     x = preprocess_segformer(img).to(device)
-    out = model(pixel_values=x)
-    logits = out.logits  # (1, 19, h/4, w/4)
-    logits = nn.functional.interpolate(
-        logits, size=(h, w), mode="bilinear", align_corners=False
-    )
+    logits = model(x)  # (1, 19, H, W) — Model.forward already interpolates to full res
     return logits.argmax(dim=1).squeeze().cpu().numpy()
 
 
@@ -200,7 +193,6 @@ def main() -> None:
                         help="Path to *_gtFine_labelIds.png")
     parser.add_argument("--unet-ckpt", type=Path, default=Path("best_model_miou_unet.pt"))
     parser.add_argument("--segformer-ckpt", type=Path, default=Path("best_model_miou_segformer.pt"))
-    parser.add_argument("--segformer-config", type=Path, default=Path("segformer_config"))
     parser.add_argument("--output-dir", type=Path, default=Path("figures"))
     parser.add_argument("--unet-preprocess", choices=("starter", "recipe"),
                         default="starter",
@@ -218,13 +210,6 @@ def main() -> None:
     ]:
         if not path.is_file():
             raise FileNotFoundError(f"{label}: file not found at {path}")
-    if not args.segformer_config.is_dir():
-        raise FileNotFoundError(
-            f"--segformer-config: directory not found at {args.segformer_config}. "
-            "This must point to the local copy of the HuggingFace SegFormer "
-            "config (segformer_config/config.json), per PROJECT_KNOWLEDGE.md §11."
-        )
-
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Input image
@@ -245,7 +230,7 @@ def main() -> None:
         torch.cuda.empty_cache()
 
     # 4. SegFormer prediction
-    segformer = load_segformer(args.segformer_ckpt, args.segformer_config, args.device)
+    segformer = load_segformer(args.segformer_ckpt, args.device)
     seg_pred = predict_segformer(segformer, img, args.device)
     colorize(seg_pred).save(args.output_dir / "segformer_pred.png")
 
