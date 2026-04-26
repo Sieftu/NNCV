@@ -101,6 +101,8 @@ def labelid_to_trainid(arr: np.ndarray) -> np.ndarray:
     """Map raw Cityscapes labelIds (0..33) to trainIds (0..18, 255)."""
     out = np.full_like(arr, 255)
     for label_id, train_id in ID_TO_TRAINID.items():
+        if train_id < 0:  # -1 means ignore; leave as 255
+            continue
         out[arr == label_id] = train_id
     return out
 
