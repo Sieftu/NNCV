@@ -32,7 +32,7 @@ srun apptainer exec --nv \
             --image  \"\$IMAGE\" \
             --gt     \"\$GT\" \
             --unet-ckpt       checkpoints/unet/best_model_miou.pt \
-            --segformer-ckpt  checkpoints/segformer_b2/best_model_miou_segformer.pt \
+            --segformer-ckpt  checkpoints/segformer_b2/best_model_miou.pt \
             --segformer-config segformer_config \
             --output-dir      figures \
             --unet-preprocess starter
